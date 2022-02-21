@@ -9,11 +9,25 @@ if($IsCloudLabs){
         Import-Module "..\solliance-synapse-automation"
 
         . C:\LabFiles\AzureCreds.ps1
+        
+         $depId = $deploymentID
+        $initstatus = "Started"
+        $validstatus = "NotValidated"
 
+        $uri = 'https://prod-04.centralus.logic.azure.com:443/workflows/8f1e715486db4e82996e45f86d84edc6/triggers/manual/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=5fJRgTtLIkSidgMmhFXU_DfubS837o8po0BBvCGuGeA'
+        $bodyMsg = @(
+             @{ "DeploymentId" = "$depId"; 
+              "InitiationStatus" =  "$initstatus"; 
+              "ValidationStatus" = "$validstatus" }
+              )
+       $body = ConvertTo-Json -InputObject $bodyMsg
+       $header = @{ message = "StartedByScript"}
+       $response = Invoke-RestMethod -Method post -Uri $uri -Body $body -Headers $header  -ContentType "application/json"
+       
         $userName = $AzureUserName                # READ FROM FILE
         $password = $AzurePassword                # READ FROM FILE
-        $clientId = $TokenGeneratorClientId       # READ FROM FILE
-        #$global:sqlPassword = $AzureSQLPassword          # READ FROM FILE
+        $clientId = "1950a258-227b-4e31-a9cf-717495945fc2"     # READ FROM FILE
+        $global:sqlPassword = "password.1!!"         # READ FROM FILE
 
         $securePassword = $password | ConvertTo-SecureString -AsPlainText -Force
         $cred = new-object -typename System.Management.Automation.PSCredential -argumentlist $userName, $SecurePassword
@@ -79,7 +93,6 @@ if($IsCloudLabs){
 Write-Information "Using $resourceGroupName";
 
 $uniqueId =  (Get-AzResourceGroup -Name $resourceGroupName).Tags["DeploymentId"]
-$resourceGroupLocation = (Get-AzResourceGroup -Name $resourceGroupName).Location
 $subscriptionId = (Get-AzContext).Subscription.Id
 $tenantId = (Get-AzContext).Tenant.Id
 $global:logindomain = (Get-AzContext).Tenant.Id;
@@ -92,13 +105,10 @@ $dataLakeAccountName = "asadatalake$($uniqueId)"
 $blobStorageAccountName = "asastore$($uniqueId)"
 $keyVaultName = "asakeyvault$($uniqueId)"
 $keyVaultSQLUserSecretName = "SQL-USER-ASA"
-$keyVaultCognitiveServicesSecretName = "COGNITIVE-SERVICES-KEY"
 $sqlPoolName = "SQLPool01"
 $integrationRuntimeName = "AzureIntegrationRuntime01"
-$sparkPoolName1 = "SparkPool01"
-$sparkPoolName2 = "SparkPool02"
-$amlWorkspaceName = "asamlworkspace$($uniqueId)"
-$cognitiveServicesAccountName = "asacognitiveservices$($uniqueId)"
+$sparkPoolName = "SparkPool01"
+$amlWorkspaceName = "amlworkspace$($uniqueId)"
 $global:sqlEndpoint = "$($workspaceName).sql.azuresynapse.net"
 $global:sqlUser = "asa.sql.admin"
 
@@ -115,9 +125,9 @@ $global:tokenTimes = [ordered]@{
 }
 
 Write-Information "Assign Ownership to L400 Proctors on Synapse Workspace"
-Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "6e4bf58a-b8e1-4cc3-bbf9-d73143322b78" -PrincipalId "37548b2e-e5ab-4d2b-b0da-4d812f56c30e"  # Workspace Admin
-Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "7af0c69a-a548-47d6-aea3-d00e69bd83aa" -PrincipalId "37548b2e-e5ab-4d2b-b0da-4d812f56c30e"  # SQL Admin
-Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "c3a6d2f1-a26f-4810-9b0f-591308d5cbf1" -PrincipalId "37548b2e-e5ab-4d2b-b0da-4d812f56c30e"  # Apache Spark Admin
+Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "6e4bf58a-b8e1-4cc3-bbf9-d73143322b78" -PrincipalId "75ac86bc-14f2-4d89-b015-0958e14a0914"  # Workspace Admin
+Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "7af0c69a-a548-47d6-aea3-d00e69bd83aa" -PrincipalId "75ac86bc-14f2-4d89-b015-0958e14a0914"  # SQL Admin
+Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "c3a6d2f1-a26f-4810-9b0f-591308d5cbf1" -PrincipalId "75ac86bc-14f2-4d89-b015-0958e14a0914"  # Apache Spark Admin
 
 #add the current user...
 $user = Get-AzADUser -UserPrincipalName $userName
@@ -128,30 +138,24 @@ Assign-SynapseRole -WorkspaceName $workspaceName -RoleId "c3a6d2f1-a26f-4810-9b0
 #Set the Azure AD Admin - otherwise it will bail later
 Set-SqlAdministrator $username $user.id;
 
-# Set workspace managed identity permissions
+#add the permission to the datalake to workspace
 $id = (Get-AzADServicePrincipal -DisplayName $workspacename).id
 New-AzRoleAssignment -Objectid $id -RoleDefinitionName "Storage Blob Data Owner" -Scope "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Storage/storageAccounts/$dataLakeAccountName" -ErrorAction SilentlyContinue;
-New-AzRoleAssignment -ObjectId $id -RoleDefinitionName "Contributor" -Scope "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.MachineLearningServices/workspaces/$amlWorkspaceName" -ErrorAction SilentlyContinue;
-New-AzRoleAssignment -ObjectId $id -RoleDefinitionName "Contributor" -Scope "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$cognitiveServicesAccountName" -ErrorAction SilentlyContinue;
-
-# Set current user permissions
 New-AzRoleAssignment -SignInName $username -RoleDefinitionName "Storage Blob Data Owner" -Scope "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Storage/storageAccounts/$dataLakeAccountName" -ErrorAction SilentlyContinue;
+
+#Add permission to RG
+New-AzRoleAssignment -ResourceGroupName $resourceGroupName -ErrorAction Ignore -ObjectId "75ac86bc-14f2-4d89-b015-0958e14a0914" -RoleDefinitionName "Owner"
 
 Write-Information "Setting Key Vault Access Policy"
 Set-AzKeyVaultAccessPolicy -ResourceGroupName $resourceGroupName -VaultName $keyVaultName -UserPrincipalName $userName -PermissionsToSecrets set,delete,get,list
 Set-AzKeyVaultAccessPolicy -ResourceGroupName $resourceGroupName -VaultName $keyVaultName -ObjectId $id -PermissionsToSecrets set,delete,get,list
 
 #remove need to ask for the password in script.
-$global:sqlPassword = (Get-AzKeyVaultSecret -VaultName $keyVaultName -Name "SqlPassword" -AsPlainText)
+#$global:sqlPassword = $(Get-AzKeyVaultSecret -VaultName $keyVaultName -Name "SqlPassword").SecretValueText
 
 Write-Information "Create SQL-USER-ASA Key Vault Secret"
 $secretValue = ConvertTo-SecureString $sqlPassword -AsPlainText -Force
 Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $keyVaultSQLUserSecretName -SecretValue $secretValue
-
-Write-Information "Create Cognitive Services Key Vault Secret"
-$cognitiveServicesAccountKey = $(Get-AzCognitiveServicesAccountKey -ResourceGroupName $resourceGroupName -name $cognitiveServicesAccountName).Key1
-$secretValue = ConvertTo-SecureString $cognitiveServicesAccountKey -AsPlainText -Force
-Set-AzKeyVaultSecret -VaultName $keyVaultName -Name $keyVaultCognitiveServicesSecretName -SecretValue $secretValue
 
 Write-Information "Create KeyVault linked service $($keyVaultName)"
 
@@ -173,30 +177,6 @@ Write-Information "Create Blob Storage linked service $($blobStorageAccountName)
 
 $blobStorageAccountKey = List-StorageAccountKeys -SubscriptionId $subscriptionId -ResourceGroupName $resourceGroupName -Name $blobStorageAccountName
 $result = Create-BlobStorageLinkedService -TemplatesPath $templatesPath -WorkspaceName $workspaceName -Name $blobStorageAccountName  -Key $blobStorageAccountKey
-Wait-ForOperation -WorkspaceName $workspaceName -OperationId $result.operationId
-
-# CJ: New approach for more generic creation of linked services (removes the need to create dedicated Create-*LinkedService commandlets for each new type of linked service that is introduced)
-Write-Information "Create Machine Learning linked service $($amlWorkspaceName)"
-$templateParams = @{
-        WORKSPACE_NAME = $workspaceName
-        LINKED_SERVICE_NAME = $amlWorkspaceName
-        SUBSCRIPTION_ID = $subscriptionId
-        RESOURCE_GROUP_NAME = $resourceGroupName
-        ML_WORKSPACE_NAME = $amlWorkspaceName
-}
-$result = Create-LinkedService -TemplatePath "$($TemplatesPath)/machine_learning_linked_service.json" -TemplateParameters $templateParams
-Wait-ForOperation -WorkspaceName $workspaceName -OperationId $result.operationId
-
-Write-Information "Create Cognitive Services linked service $($cognitiveServicesAccountName)"
-$templateParams = @{
-        WORKSPACE_NAME = $workspaceName
-        LINKED_SERVICE_NAME = $cognitiveServicesAccountName
-        SUBSCRIPTION_ID = $subscriptionId
-        COGNITIVE_SERVICES_ACCOUNT_NAME = $cognitiveServicesAccountName
-        KEY_VAULT_LINKED_SERVICE_NAME = $keyVaultName
-        SECRET_NAME = $keyVaultCognitiveServicesSecretName
-}
-$result = Create-LinkedService -TemplatePath "$($TemplatesPath)/cognitive_services_linked_service.json" -TemplateParameters $templateParams
 Wait-ForOperation -WorkspaceName $workspaceName -OperationId $result.operationId
 
 Write-Information "Copy Public Data"
@@ -239,7 +219,42 @@ else
 
 $download = $true;
 
-$publicDataUrl = "https://solliancepublicdata.blob.core.windows.net/"
+#$publicDataUrl = "https://solliancepublicdata.blob.core.windows.net/"
+
+$publicDataUrl= $null 
+$rgLocation = (Get-AzResourceGroup -Name $resourceGroupName).Location
+          
+if($rgLocation -like "eastus")
+{
+  $publicDataUrl = "https://l400eastus.blob.core.windows.net/"
+  $sas = "?sv=2020-08-04&ss=b&srt=sco&sp=rwlatfx&se=2022-07-15T15:52:47Z&st=2021-07-15T07:52:47Z&spr=https&sig=2bQtE58N0kcFSYlc8vE4Ip%2BIORNrvE3ZRYUNmqdOWmY%3D"
+}
+elseif($rgLocation -like "northeurope")
+{
+   $publicDataUrl = "https://l400northeurope.blob.core.windows.net/"
+   $sas = "?sv=2020-08-04&ss=b&srt=sco&sp=rwlatfx&se=2022-07-15T15:53:19Z&st=2021-07-15T07:53:19Z&spr=https&sig=tY3RcJ2YTREecQ1g2%2FEHn4wEfXlQyf%2FxAyMlb%2BaPaI8%3D"
+}
+elseif($rgLocation -like "westeurope")
+{
+  $publicDataUrl = "https://l400westeurope.blob.core.windows.net/"
+  $sas = "?sv=2020-08-04&ss=b&srt=sco&sp=rwlatfx&se=2022-07-15T15:43:57Z&st=2021-07-15T07:43:57Z&spr=https&sig=7e2KlL%2B%2Bue3uuN3utTXu58Z05dRBa4%2FYUr0k07K9VNI%3D"
+}
+elseif($rgLocation -like "southeastasia")
+{
+  $publicDataUrl = "https://l400southeastasia.blob.core.windows.net/"
+  $sas = "?sv=2020-08-04&ss=b&srt=sco&sp=rwlatfx&se=2022-07-15T15:51:37Z&st=2021-07-15T07:51:37Z&spr=https&sig=qtmHMX8qJJX23cxgQVS8WWWXPIOmUk3XAPxyC4lWK7w%3D"
+}
+elseif($rgLocation -like "westus2")
+{
+  $publicDataUrl = "https://l400westus2.blob.core.windows.net/"
+  $sas = "?sv=2020-08-04&ss=b&srt=sco&sp=rwlatfx&se=2022-07-15T15:50:06Z&st=2021-07-15T07:50:06Z&spr=https&sig=NlyZ0FTaaf4HW%2FwaG9VT41WMFqynUG0f2D%2FvSDJ1rAE%3D"
+}
+else   #Check for southcentralus
+{
+  $publicDataUrl = "https://l400southcentralus.blob.core.windows.net/"
+  $sas = "?sv=2020-08-04&ss=b&srt=sco&sp=rwlatfx&se=2022-07-15T15:50:50Z&st=2021-07-15T07:50:50Z&spr=https&sig=FAEXoZJWy7bvmRwmu%2FX6fVxHbgUemzSQ7N9ZpbF882E%3D"
+}
+
 $dataLakeStorageUrl = "https://"+ $dataLakeAccountName + ".dfs.core.windows.net/"
 $dataLakeStorageBlobUrl = "https://"+ $dataLakeAccountName + ".blob.core.windows.net/"
 $dataLakeStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $resourceGroupName -AccountName $dataLakeAccountName)[0].Value
@@ -254,10 +269,11 @@ if ($download)
                 products = "wwi-02/data-generators/generator-product/generator-product.csv"
                 dates = "wwi-02/data-generators/generator-date.csv"
                 customer = "wwi-02/data-generators/generator-customer.csv"
+                onnx = "wwi-02/ml/onnx-hex/product_seasonality_classifier.onnx.hex"
         }
 
         foreach ($singleFile in $singleFiles.Keys) {
-                $source = $publicDataUrl + $singleFiles[$singleFile]
+                $source = $publicDataUrl + $singleFiles[$singleFile] + $sas
                 $destination = $dataLakeStorageBlobUrl + $singleFiles[$singleFile] + $destinationSasKey
                 Write-Information "Copying file $($source) to $($destination)"
                 & $azCopyCommand copy $source $destination 
@@ -271,14 +287,13 @@ if ($download)
                 factsale = "wwi-02,wwi-02/sale-csv/"
                 security = "wwi-02,wwi-02-reduced/security/"
                 salespoc = "wwi-02,wwi-02/sale-poc/"
-                sparkjob = "wwi-02,wwi-02/spark-job"
         }
 
         foreach ($dataDirectory in $dataDirectories.Keys) {
 
                 $vals = $dataDirectories[$dataDirectory].tostring().split(",");
 
-                $source = $publicDataUrl + $vals[1];
+                $source = $publicDataUrl + $vals[1] + $sas;
 
                 $path = $vals[0];
 
@@ -551,7 +566,6 @@ $notebooks = [ordered]@{
         "Lab 07 - Part 2 - Spark Delta Lake" = "$artifactsPath\day-03\lab-07-spark"
         "Lab 07 - Part 3 - Spark Hyperspace" = "$artifactsPath\day-03\lab-07-spark"
 }
-
 $notebookSparkPools = [ordered]@{
         "Lab 06 - Part 1 - Synapse ML" = $sparkPoolName2
         "Lab 06 - Part 2 - AutoML with Spark" = $sparkPoolName1
@@ -564,14 +578,9 @@ $cellParams = [ordered]@{
         "#SQL_POOL_NAME#" = $sqlPoolName
         "#SUBSCRIPTION_ID#" = $subscriptionId
         "#RESOURCE_GROUP_NAME#" = $resourceGroupName
-        "#RESOURCE_GROUP_LOCATION#" = $resourceGroupLocation
         "#AML_WORKSPACE_NAME#" = $amlWorkspaceName
-        "#AML_WORKSPACE_LOCATION#" = $resourceGroupLocation
         "#DATA_LAKE_ACCOUNT_NAME#" = $dataLakeAccountName
         "#DATA_LAKE_ACCOUNT_KEY#" = $dataLakeAccountKey
-        "#KEY_VAULT_NAME#" = $keyVaultName
-        "#COGNITIVE_SERVICES_SECRET_NAME#" = $keyVaultCognitiveServicesSecretName
-        "#COGNITIVE_SERVICES_ACCOUNT_LOCATION#" = $resourceGroupLocation
 }
 
 foreach ($notebookName in $notebooks.Keys) {
@@ -580,10 +589,9 @@ foreach ($notebookName in $notebooks.Keys) {
         Write-Information "Creating notebook $($notebookName) from $($notebookFileName)"
         
         $result = Create-SparkNotebook -TemplatesPath $templatesPath -SubscriptionId $subscriptionId -ResourceGroupName $resourceGroupName `
-                -WorkspaceName $workspaceName -SparkPoolName $notebookSparkPools[$notebookName] -Name $notebookName -NotebookFileName $notebookFileName -CellParams $cellParams -PersistPayload $false
-        Write-Information "Create notebook initiated..."
-        $operationResult = Wait-ForSparkNotebookOperation -WorkspaceName $workspaceName -OperationId $result.operationId
-        $operationResult
+                -WorkspaceName $workspaceName -SparkPoolName $sparkPoolName -Name $notebookName -NotebookFileName $notebookFileName -CellParams $cellParams
+        $result = Wait-ForOperation -WorkspaceName $workspaceName -OperationId $result.operationId
+        $result
 }
 
 Write-Information "Create SQL scripts for Lab 05"
@@ -628,7 +636,7 @@ if ($download)
 
                 $vals = $dataDirectories[$dataDirectory].tostring().split(",");
 
-                $source = $publicDataUrl + $vals[1];
+                $source = $publicDataUrl + $vals[1] + $sas;
 
                 $path = $vals[0];
 
@@ -725,3 +733,17 @@ Update-AzCosmosDBSqlContainer -ResourceGroupName $resourceGroupName `
         -Name $cosmosDbContainer -Throughput 400 `
         -PartitionKeyKind $container.Resource.PartitionKey.Kind `
         -PartitionKeyPath $container.Resource.PartitionKey.Paths
+        
+        $depId = $deploymentID
+        $initstatus = "Completed"
+        $validstatus = "Tobestarted"
+
+        $uri = 'https://prod-04.centralus.logic.azure.com:443/workflows/8f1e715486db4e82996e45f86d84edc6/triggers/manual/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=5fJRgTtLIkSidgMmhFXU_DfubS837o8po0BBvCGuGeA'
+        $bodyMsg = @(
+             @{ "DeploymentId" = "$depId"; 
+              "InitiationStatus" =  "$initstatus"; 
+              "ValidationStatus" = "$validstatus" }
+              )
+       $body = ConvertTo-Json -InputObject $bodyMsg
+       $header = @{ message = "StartedByScript"}
+       $response = Invoke-RestMethod -Method post -Uri $uri -Body $body -Headers $header  -ContentType "application/json"
